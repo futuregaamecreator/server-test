@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cricket Wireless Assistant</title>
+    <style>
+      :root {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+      }
+      main {
+        max-width: 420px;
+        margin: 0 auto;
+        border-radius: 16px;
+        padding: 16px;
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+        background: #ffffff;
+      }
+      h2 {
+        margin-top: 0;
+      }
+      .plan-card,
+      .promo-card {
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 10px;
+        border: 1px solid #e2e8f0;
+      }
+      button {
+        border-radius: 999px;
+        border: none;
+        padding: 6px 12px;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+      button.primary {
+        background: #00a651; /* Cricket-like green */
+        color: white;
+      }
+      button.secondary {
+        background: #f1f5f9;
+      }
+      .buttons-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .input-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      input[type="text"] {
+        flex: 1;
+        padding: 6px 8px;
+        border-radius: 999px;
+        border: 1px solid #cbd5e1;
+      }
+      small {
+        color: #64748b;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h2>Cricket Wireless Assistant</h2>
+      <div id="root"></div>
+    </main>
+
+    <script type="module">
+      const root = document.getElementById("root");
+
+      function getToolOutput() {
+        // window.openai.toolOutput is set when a tool renders this widget
+        return window.openai?.toolOutput ?? window.openai?.globals?.toolOutput ?? {};
+      }
+
+      function renderPlans(toolOutput) {
+        const { structuredContent } = toolOutput;
+        const { plans = [], recommendedPlanId } = structuredContent ?? {};
+
+        const container = document.createElement("div");
+        const intro = document.createElement("p");
+        intro.textContent = "Choose a Cricket plan or explore options below.";
+        container.appendChild(intro);
+
+        plans.forEach((plan) => {
+          const card = document.createElement("div");
+          card.className = "plan-card";
+
+          const title = document.createElement("strong");
+          title.textContent = `${plan.name} · $${plan.price}/mo`;
+          card.appendChild(title);
+
+          const desc = document.createElement("p");
+          desc.textContent = plan.description;
+          card.appendChild(desc);
+
+          const meta = document.createElement("small");
+          meta.textContent = plan.bestFor;
+          card.appendChild(meta);
+
+          const buttons = document.createElement("div");
+          buttons.className = "buttons-row";
+
+          const chooseBtn = document.createElement("button");
+          chooseBtn.className = "primary";
+          chooseBtn.textContent =
+            plan.id === recommendedPlanId ? "Choose (Recommended)" : "Choose This Plan";
+          chooseBtn.onclick = async () => {
+            await window.openai?.callTool?.("cricket_promotions", {
+              planId: plan.id
+            });
+          };
+          buttons.appendChild(chooseBtn);
+
+          const compareBtn = document.createElement("button");
+          compareBtn.className = "secondary";
+          compareBtn.textContent = "Compare Plans";
+          compareBtn.onclick = async () => {
+            await window.openai?.callTool?.("cricket_view_plans", {
+              recommendedPlanId: plan.id
+            });
+          };
+          buttons.appendChild(compareBtn);
+
+          card.appendChild(buttons);
+          container.appendChild(card);
+        });
+
+        // Coverage & BYOD quick actions
+        const extraRow = document.createElement("div");
+        extraRow.className = "buttons-row";
+
+        const coverageBtn = document.createElement("button");
+        coverageBtn.className = "secondary";
+        coverageBtn.textContent = "Check Coverage";
+        coverageBtn.onclick = () => renderCoverageForm();
+        extraRow.appendChild(coverageBtn);
+
+        const deviceBtn = document.createElement("button");
+        deviceBtn.className = "secondary";
+        deviceBtn.textContent = "Check My Phone";
+        deviceBtn.onclick = () => renderDeviceForm();
+        extraRow.appendChild(deviceBtn);
+
+        container.appendChild(extraRow);
+
+        return container;
+      }
+
+      function renderCoverage(toolOutput) {
+        const { structuredContent } = toolOutput;
+        const { coverage } = structuredContent ?? {};
+        const container = document.createElement("div");
+
+        const p = document.createElement("p");
+        p.textContent = coverage?.message ?? "Enter your ZIP to check coverage.";
+        container.appendChild(p);
+
+        const form = renderCoverageForm();
+        container.appendChild(form);
+
+        return container;
+      }
+
+      function renderCoverageForm() {
+        const wrapper = document.createElement("div");
+        wrapper.className = "input-row";
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.placeholder = "ZIP code";
+
+        const button = document.createElement("button");
+        button.className = "primary";
+        button.textContent = "Check";
+        button.onclick = async () => {
+          const zip = input.value.trim();
+          if (!zip) return;
+          await window.openai?.callTool?.("cricket_check_coverage", { zip });
+        };
+
+        wrapper.appendChild(input);
+        wrapper.appendChild(button);
+        return wrapper;
+      }
+
+      function renderDevice(toolOutput) {
+        const { structuredContent } = toolOutput;
+        const { device } = structuredContent ?? {};
+
+        const container = document.createElement("div");
+
+        if (device?.message) {
+          const p = document.createElement("p");
+          p.textContent = device.message;
+          container.appendChild(p);
+        }
+
+        const form = renderDeviceForm();
+        container.appendChild(form);
+
+        return container;
+      }
+
+      function renderDeviceForm() {
+        const wrapper = document.createElement("div");
+        wrapper.className = "input-row";
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.placeholder = "IMEI";
+
+        const button = document.createElement("button");
+        button.className = "primary";
+        button.textContent = "Check Phone";
+        button.onclick = async () => {
+          const imei = input.value.trim();
+          if (!imei) return;
+          await window.openai?.callTool?.("cricket_check_device", { imei });
+        };
+
+        wrapper.appendChild(input);
+        wrapper.appendChild(button);
+        return wrapper;
+      }
+
+      function renderPromotions(toolOutput) {
+        const { structuredContent } = toolOutput;
+        const { promotions = [] } = structuredContent ?? {};
+
+        const container = document.createElement("div");
+        const intro = document.createElement("p");
+        intro.textContent = "Here are current Cricket deals:";
+        container.appendChild(intro);
+
+        promotions.forEach((promo) => {
+          const card = document.createElement("div");
+          card.className = "promo-card";
+
+          const title = document.createElement("strong");
+          title.textContent = promo.title;
+          card.appendChild(title);
+
+          const desc = document.createElement("p");
+          desc.textContent = promo.description;
+          card.appendChild(desc);
+
+          container.appendChild(card);
+        });
+
+        const buttonRow = document.createElement("div");
+        buttonRow.className = "buttons-row";
+
+        const plansBtn = document.createElement("button");
+        plansBtn.className = "primary";
+        plansBtn.textContent = "View Plans";
+        plansBtn.onclick = async () => {
+          await window.openai?.callTool?.("cricket_view_plans", {});
+        };
+        buttonRow.appendChild(plansBtn);
+
+        container.appendChild(buttonRow);
+        return container;
+      }
+
+      function renderRoot() {
+        const toolOutput = getToolOutput();
+        root.innerHTML = "";
+
+        const view = toolOutput?.structuredContent?.view ?? "plans";
+
+        let viewNode;
+        if (view === "coverage") {
+          viewNode = renderCoverage(toolOutput);
+        } else if (view === "device") {
+          viewNode = renderDevice(toolOutput);
+        } else if (view === "promotions") {
+          viewNode = renderPromotions(toolOutput);
+        } else {
+          // default: plans
+          viewNode = renderPlans(toolOutput);
+        }
+
+        root.appendChild(viewNode);
+      }
+
+      // Initial render
+      renderRoot();
+
+      // Listen for global updates from ChatGPT
+      window.addEventListener("openai:set_globals", () => {
+        renderRoot();
+      });
+    </script>
+  </body>
+</html>
