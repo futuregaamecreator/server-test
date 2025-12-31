@@ -1,0 +1,12 @@
+@import "tailwindcss";
+@import "@openai/apps-sdk-ui/css";
+@import "./brand.css";
+
+/* Required for Tailwind to scan SDK components */
+@source "../node_modules/@openai/apps-sdk-ui";
+
+.nav-header {
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  padding-top: 12px;
+}

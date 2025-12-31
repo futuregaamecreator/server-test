@@ -1,0 +1,8 @@
+@layer base {
+  :root {
+    --cricket-green: #00a651;
+    --cricket-green-dark: #008a44;
+    --cricket-surface: #ffffff;
+    --cricket-muted: #64748b;
+  }
+}

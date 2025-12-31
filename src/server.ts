@@ -31,9 +31,9 @@ function createCricketServer() {
 
   // 🔹 Load your HTML widget from public/cricket-widget.html
   const widgetHtml = readFileSync(
-    join(process.cwd(), "public", "cricket-widget.html"),
-    "utf8"
-  );
+  join(process.cwd(), "public/widget/index.html"),
+  "utf8"
+);
 
   // 🔹 Register the widget as a UI resource for Apps SDK
   server.registerResource(
