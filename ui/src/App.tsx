@@ -10,127 +10,179 @@ type Plan = {
   bestFor: string;
 };
 
-function readToolOutput(): any {
-  return (window as any).openai?.toolOutput ?? (window as any).openai?.globals?.toolOutput ?? {};
+function readHostToolOutput(): any {
+  return (
+    (window as any).openai?.toolOutput ??
+    (window as any).openai?.globals?.toolOutput ??
+    null
+  );
+}
+
+function isMeaningful(o: any) {
+  if (!o || typeof o !== "object") return false;
+  if (o.structuredContent?.view) return true;
+  if (Array.isArray(o.content) && o.content.length > 0) return true;
+  if (typeof o.result === "string") return true;
+  return false;
 }
 
 export default function App() {
-  const [toolOutput, setToolOutput] = useState<any>(() => readToolOutput());
+  const [toolOutput, setToolOutput] = useState<any>(() => {
+    const init = readHostToolOutput();
+    return isMeaningful(init) ? init : {};
+  });
 
-  // Local UI routing for the “starter” flow (home/coverage/phones)
-  const [localView, setLocalView] = useState<"home" | "coverage" | "phones">("home");
+  const [localView, setLocalView] = useState<
+    "home" | "coverage" | "coverageResult" | "phones"
+  >("home");
+
+
+  // 🔑 SINGLE SOURCE OF TRUTH FOR NAVIGATION
+  const [ignoreToolView, setIgnoreToolView] = useState(false);
+
   const [zip, setZip] = useState("");
   const [imei, setImei] = useState("");
+  const [coverageResult, setCoverageResult] = useState<null | "success">(null);
+  const [deviceResult, setDeviceResult] = useState<null | "success">(null);
+
+
+
+  // Sync from host, but don't overwrite with empty junk
+  const syncFromHost = () => {
+    const next = readHostToolOutput();
+    if (isMeaningful(next)) setToolOutput(next);
+  };
 
   useEffect(() => {
-    const handler = () => setToolOutput(readToolOutput());
+    const handler = () => syncFromHost();
     window.addEventListener("openai:set_globals", handler);
-    return () => window.removeEventListener("openai:set_globals", handler);
+
+    const id = setInterval(syncFromHost, 400);
+
+    return () => {
+      window.removeEventListener("openai:set_globals", handler);
+      clearInterval(id);
+    };
   }, []);
 
   const { viewFromTool, plans, recommendedPlanId, maxHeight } = useMemo(() => {
     const sc = toolOutput?.structuredContent ?? {};
     return {
-      viewFromTool: (sc.view ?? "home") as string,
+      viewFromTool: (sc.view ?? null) as string | null,
       plans: (sc.plans ?? []) as Plan[],
       recommendedPlanId: sc.recommendedPlanId as string | undefined,
-      maxHeight: ((window as any).openai?.maxHeight ?? 260) as number
+      maxHeight: ((window as any).openai?.maxHeight ?? 260) as number,
     };
   }, [toolOutput]);
 
+  // 🔑 THIS IS THE ROUTER
+  const toolView = ignoreToolView ? null : viewFromTool;
+
+  // If tool changes views, allow it to control UI again
+  useEffect(() => {
+    if (viewFromTool) setIgnoreToolView(false);
+  }, [viewFromTool]);
+
   async function callTool(name: string, args: any) {
-    await (window as any).openai?.callTool?.(name, args);
+    const res = await (window as any).openai?.callTool?.(name, args);
+    if (isMeaningful(res)) setToolOutput(res);
+    else syncFromHost();
   }
 
-  // Decide what to render:
-  // - If tool output says "plans/promotions/device/coverage", show those
-  // - Otherwise show our local starter views (home/coverage/phones)
-  const toolView = viewFromTool;
+  const goHome = () => {
+    setIgnoreToolView(true);   // 👈 ignore tool routing
+    setLocalView("home");
+  };
 
   return (
     <div className="w-full px-3 py-2" style={{ maxHeight, overflowY: "auto" }}>
       {/* Header */}
       <div className="flex items-center justify-between gap-2 nav-header">
-        <div>
-          <div className="text-xs font-medium text-secondary"><img src="https://www.cricketwireless.com/uiassets/logo_cricket-green.png" height="32" width="144" alt="Cricket Wireless Home Page"/></div>
-        </div>
+        <img
+          src="https://www.cricketwireless.com/uiassets/logo_cricket-green.png"
+          height="32"
+          width="144"
+          alt="Cricket Wireless"
+        />
 
         <Button
           variant="soft"
           color="secondary"
-          onClick={() => (window as any).openai?.requestDisplayMode?.({ mode: "fullscreen" })}
+          onClick={() =>
+            (window as any).openai?.requestDisplayMode?.({ mode: "fullscreen" })
+          }
         >
           Expand
         </Button>
       </div>
 
-      {/* TOOL-DRIVEN VIEWS */}
+      {/* TOOL: PLANS */}
       {toolView === "plans" && (
         <div className="mt-3 grid gap-3">
-          {plans.length === 0 ? (
-            <div className="text-sm text-secondary">
-              No plans found yet. Try “Plans” from the home screen.
-            </div>
-          ) : (
-            plans.map((p) => {
-              const isRecommended = p.id === recommendedPlanId;
+          {plans.map((p) => {
+            const isRecommended = p.id === recommendedPlanId;
 
-              return (
-                <div
-                  key={p.id}
-                  className={`rounded-xl border p-3 ${
-                    isRecommended ? "border-[#00a651] bg-white" : "border-default bg-surface"
+            return (
+              <div
+                key={p.id}
+                className={`rounded-xl border p-3 ${isRecommended
+                  ? "border-[#00a651] bg-white"
+                  : "border-default bg-surface"
                   }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-semibold text-sm text-[#0b0b0f]">
-                        {p.name} · ${p.price}/mo
-                      </div>
-                      <div className="mt-1 text-sm text-secondary">{p.description}</div>
+              >
+                <div className="flex justify-between gap-2">
+                  <div>
+                    <div className="font-semibold text-sm">
+                      {p.name} · ${p.price}/mo
                     </div>
-
-                    {isRecommended ? <Badge color="success">Best value</Badge> : null}
+                    <div className="mt-1 text-sm text-secondary">
+                      {p.description}
+                    </div>
                   </div>
 
-                  <div className="mt-2 text-xs text-secondary">{p.bestFor}</div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button
-                      color="primary"
-                      className="!bg-[#00a651] hover:!bg-[#008a44]"
-                      onClick={() => callTool("cricket_promotions", { planId: p.id })}
-                    >
-                      Choose
-                    </Button>
-
-                    <Button
-                      variant="soft"
-                      color="secondary"
-                      onClick={() => callTool("cricket_view_plans", { recommendedPlanId: p.id })}
-                    >
-                      Compare
-                    </Button>
-
-                    <Button variant="soft" color="secondary" onClick={() => setLocalView("home")}>
-                      Back
-                    </Button>
-                  </div>
+                  {isRecommended && <Badge color="success">Best value</Badge>}
                 </div>
-              );
-            })
-          )}
+
+                <div className="mt-2 text-xs text-secondary">{p.bestFor}</div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    color="primary"
+                    className="!bg-[#00a651]"
+                    onClick={() =>
+                      callTool("cricket_promotions", { planId: p.id })
+                    }
+                  >
+                    Choose
+                  </Button>
+
+                  <Button
+                    variant="soft"
+                    color="secondary"
+                    onClick={() =>
+                      callTool("cricket_view_plans", { recommendedPlanId: p.id })
+                    }
+                  >
+                    Compare
+                  </Button>
+
+                  {/* 👈 LOCAL BACK */}
+                  <Button variant="soft" color="secondary" onClick={goHome}>
+                    Back
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
+      {/* TOOL: PROMOTIONS */}
       {toolView === "promotions" && (
-        <div className="mt-3 rounded-xl border border-default bg-surface p-3">
-          <div className="font-semibold text-sm text-[#0b0b0f]">Deals</div>
-          <div className="mt-2 text-sm text-secondary">
-            (Promotions will render here from your tool output.)
-          </div>
+        <div className="mt-3 rounded-xl border p-3">
+          <div className="font-semibold text-sm">Deals</div>
 
-          <div className="mt-3 flex gap-2 flex-wrap">
+          <div className="mt-3 flex gap-2">
             <Button
               color="primary"
               className="!bg-[#00a651]"
@@ -138,33 +190,28 @@ export default function App() {
             >
               Back to plans
             </Button>
-            <Button variant="soft" color="secondary" onClick={() => setLocalView("home")}>
+
+            <Button variant="soft" color="secondary" onClick={goHome}>
               Home
             </Button>
           </div>
         </div>
       )}
 
-      {/* STARTER FLOW VIEWS (when tool isn't driving a view) */}
-      {toolView !== "plans" && toolView !== "promotions" && localView === "home" && (
+      {/* LOCAL HOME */}
+      {toolView == null && localView === "home" && (
         <div className="mt-3 grid gap-2">
           <div className="text-sm text-secondary">What are you interested in?</div>
 
           <Button
             color="primary"
-            className="!bg-[#00a651] hover:!bg-[#008a44] justify-start"
-            onClick={() => callTool("cricket_view_plans", {})}
+            className="!bg-[#00a651] justify-start"
+            onClick={() => {
+              setIgnoreToolView(false);
+              callTool("cricket_view_plans", {});
+            }}
           >
             Plans
-          </Button>
-
-          <Button
-            variant="soft"
-            color="secondary"
-            className="justify-start"
-            onClick={() => callTool("cricket_promotions", {})}
-          >
-            Deals
           </Button>
 
           <Button
@@ -182,77 +229,144 @@ export default function App() {
             className="justify-start"
             onClick={() => setLocalView("phones")}
           >
-            Phones
-          </Button>
-
-            <Button
-            variant="soft"
-            color="secondary"
-            className="justify-start"
-            onClick={() => setLocalView("phones")}
-          >
             Is my phone compatible?
           </Button>
         </div>
       )}
 
-      {toolView !== "plans" && toolView !== "promotions" && localView === "coverage" && (
-        <div className="mt-3 rounded-xl border border-default bg-surface p-3">
-          <div className="font-semibold text-sm text-[#0b0b0f]">Check coverage</div>
-          <div className="mt-2 text-sm text-secondary">Enter your ZIP code:</div>
+      {/* LOCAL COVERAGE */}
+     {toolView == null && localView === "coverage" && coverageResult === null && (
+  <div className="mt-3 rounded-xl border border-default bg-surface p-3">
+    <div className="font-semibold text-sm text-[#0b0b0f]">Check coverage</div>
+    <div className="mt-2 text-sm text-secondary">Enter your ZIP code:</div>
 
-          <div className="mt-3 flex gap-2">
-            <input
-              className="flex-1 rounded-full border border-default px-3 py-2 text-sm"
-              placeholder="ZIP"
-              value={zip}
-              onChange={(e) => setZip(e.target.value)}
-            />
-            <Button
-              color="primary"
-              className="!bg-[#00a651]"
-              onClick={() => callTool("cricket_check_coverage", { zip: zip.trim() })}
-            >
-              Check
-            </Button>
-          </div>
+    <div className="mt-3 flex gap-2">
+      <input
+        className="flex-1 rounded-full border border-default px-3 py-2 text-sm"
+        placeholder="ZIP"
+        value={zip}
+        onChange={(e) => setZip(e.target.value)}
+      />
 
-          <div className="mt-3">
-            <Button variant="soft" color="secondary" onClick={() => setLocalView("home")}>
-              Back
-            </Button>
-          </div>
-        </div>
-      )}
+      <Button
+        color="primary"
+        className="!bg-[#00a651]"
+        onClick={() => {
+          if (zip.trim().length >= 5) {
+            setCoverageResult("success");
+          }
+        }}
+      >
+        Check
+      </Button>
+    </div>
 
-      {toolView !== "plans" && toolView !== "promotions" && localView === "phones" && (
-        <div className="mt-3 rounded-xl border border-default bg-surface p-3">
-          <div className="font-semibold text-sm text-[#0b0b0f]">Check your phone</div>
-          <div className="mt-2 text-sm text-secondary">Enter your IMEI:</div>
+    <div className="mt-3">
+      <Button variant="soft" color="secondary" onClick={() => setLocalView("home")}>
+        Back
+      </Button>
+    </div>
+  </div>
+)}
 
-          <div className="mt-3 flex gap-2">
-            <input
-              className="flex-1 rounded-full border border-default px-3 py-2 text-sm"
-              placeholder="IMEI"
-              value={imei}
-              onChange={(e) => setImei(e.target.value)}
-            />
-            <Button
-              color="primary"
-              className="!bg-[#00a651]"
-              onClick={() => callTool("cricket_check_device", { imei: imei.trim() })}
-            >
-              Check
-            </Button>
-          </div>
 
-          <div className="mt-3">
-            <Button variant="soft" color="secondary" onClick={() => setLocalView("home")}>
-              Back
-            </Button>
-          </div>
-        </div>
-      )}
+     {toolView == null && localView === "coverage" && coverageResult === "success" && (
+  <div className="mt-3 rounded-xl border border-default bg-surface p-4 text-center">
+    <div className="text-lg font-semibold text-[#00a651]">
+      🎉 Congrats! Your area has coverage!
+    </div>
+
+    <div className="mt-2 text-sm text-secondary">
+      Cricket Wireless service is available in your ZIP code.
+    </div>
+
+    <div className="mt-4">
+      <Button
+        color="primary"
+        className="!bg-[#00a651]"
+        onClick={() => {
+          setCoverageResult(null);
+          setZip("");
+          setLocalView("home");
+        }}
+      >
+        Start Over
+      </Button>
+    </div>
+  </div>
+)}
+
+
+      {/* LOCAL PHONES */}
+     {toolView == null && localView === "phones" && deviceResult === null && (
+  <div className="mt-3 rounded-xl border border-default bg-surface p-3">
+    <div className="font-semibold text-sm text-[#0b0b0f]">Check your phone</div>
+    <div className="mt-2 text-sm text-secondary">Enter your IMEI:</div>
+
+    <div className="mt-3 flex gap-2">
+      <input
+        className="flex-1 rounded-full border border-default px-3 py-2 text-sm"
+        placeholder="15-digit IMEI"
+        value={imei}
+        onChange={(e) => setImei(e.target.value)}
+      />
+
+      <Button
+        color="primary"
+        className="!bg-[#00a651]"
+        onClick={() => {
+          if (imei.trim().length === 15) {
+            setDeviceResult("success");
+          }
+        }}
+      >
+        Check
+      </Button>
+    </div>
+
+    <div className="mt-3">
+      <Button variant="soft" color="secondary" onClick={() => setLocalView("home")}>
+        Back
+      </Button>
+    </div>
+  </div>
+)}
+{toolView == null && localView === "phones" && deviceResult === "success" && (
+  <div className="mt-3 rounded-xl border border-default bg-surface p-4 text-center">
+    <div className="text-lg font-semibold text-[#00a651]">
+      🎉 Yay! Your phone is compatible
+    </div>
+
+    <div className="mt-2 text-sm text-secondary">
+      Your device works with Cricket Wireless.
+    </div>
+
+    <div className="mt-4 flex flex-col gap-2">
+      <Button
+        color="primary"
+        className="!bg-[#00a651]"
+        onClick={() => {
+          setDeviceResult(null);
+          setImei("");
+          setLocalView("home");
+        }}
+      >
+        Start Over
+      </Button>
+
+      <a
+        href="https://www.cricketwireless.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sm text-[#00a651] underline"
+      >
+        Check Cricket Out
+      </a>
+    </div>
+  </div>
+)}
+
+
     </div>
   );
 }

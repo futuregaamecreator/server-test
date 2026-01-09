@@ -1,8 +1,10 @@
 // src/server.ts
 import "dotenv/config";
 
-import express, { Request, Response } from "express";
+import express from "express";
 import cors from "cors";
+import fs from "fs";
+import path from "path";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 
@@ -10,430 +12,297 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
-// If your cricketData is TS, this import might be "./cricketData.js" after build.
-// Keep it aligned with how you currently import it elsewhere.
-import {
-  PLANS,
-  type CricketPlanId,
-  checkCoverage,
-  checkDeviceCompatibility,
-  getPromotions
-} from "./cricketData.js";
+// --------------------------------------------------
+// Config
+// --------------------------------------------------
 
+const PORT = Number(process.env.PORT ?? 8000);
+const BASE_URL = (process.env.BASE_URL ?? "").replace(/\/$/, "");
 
+if (!BASE_URL) {
+  console.warn(
+    '[WARN] BASE_URL not set. Widget assets will NOT load in ChatGPT iframe.\n' +
+    'Example: BASE_URL="https://<your-tunnel>.trycloudflare.com"'
+  );
+}
 
-import fs from "fs";
-import path from "path";
+// --------------------------------------------------
+// Helpers
+// --------------------------------------------------
 
-import { fileURLToPath } from "url";
-
-const BASE_URL = process.env.BASE_URL?.replace(/\/$/, "") ?? ""; // no trailing slash
-function guessMimeType(p: string): string {
-  const ext = path.extname(p).toLowerCase();
+function guessMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
   switch (ext) {
-    case ".html":
-      return "text/html; charset=utf-8";
-    case ".js":
-      return "application/javascript; charset=utf-8";
-    case ".css":
-      return "text/css; charset=utf-8";
-    case ".json":
-      return "application/json; charset=utf-8";
-    case ".svg":
-      return "image/svg+xml; charset=utf-8";
-    case ".png":
-      return "image/png";
+    case ".html": return "text/html; charset=utf-8";
+    case ".js": return "application/javascript; charset=utf-8";
+    case ".css": return "text/css; charset=utf-8";
+    case ".json": return "application/json; charset=utf-8";
+    case ".svg": return "image/svg+xml";
+    case ".png": return "image/png";
     case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".gif":
-      return "image/gif";
-    case ".webp":
-      return "image/webp";
-    case ".ico":
-      return "image/x-icon";
-    case ".txt":
-      return "text/plain; charset=utf-8";
-    default:
-      return "application/octet-stream";
+    case ".jpeg": return "image/jpeg";
+    case ".webp": return "image/webp";
+    case ".ico": return "image/x-icon";
+    default: return "application/octet-stream";
   }
 }
 
+function isTextMime(mime: string) {
+  return (
+    mime.startsWith("text/") ||
+    mime.includes("javascript") ||
+    mime.includes("json") ||
+    mime.includes("svg")
+  );
+}
 
-function uriToLocalDistPath(uri: string): string {
-  // uri could be absolute (https://...) or relative (/public/...)
+/**
+ * Maps a URL (from registerResource callback) to a local file path
+ */
+function uriToLocalPath(uri: string): string {
   let pathname: string;
 
   try {
-    // If absolute URL
     pathname = new URL(uri).pathname;
   } catch {
-    // If relative
     pathname = uri;
   }
 
-  // Ensure it starts with /public/
   if (!pathname.startsWith("/public/")) {
-    throw new Error(`Unsupported resource path: ${pathname}`);
+    throw new Error(`Blocked resource path: ${pathname}`);
   }
 
-  // Map to local filesystem under your project root
-  const localPath = path.join(process.cwd(), pathname.slice(1)); // remove leading "/"
-
-  // Prevent "../" traversal escaping the project folder
-  const normalized = path.normalize(localPath);
+  const local = path.join(process.cwd(), pathname.slice(1));
+  const normalized = path.normalize(local);
   const root = path.normalize(process.cwd() + path.sep);
+
   if (!normalized.startsWith(root)) {
-    throw new Error(`Blocked path traversal: ${uri}`);
+    throw new Error(`Path traversal attempt: ${uri}`);
   }
 
   return normalized;
 }
 
-function isTextMime(mime: string): boolean {
-  return (
-    mime.startsWith("text/") ||
-    mime.includes("javascript") ||
-    mime.includes("json") ||
-    mime.includes("svg+xml")
-  );
-}
+// --------------------------------------------------
+// Widget HTML loader (your working approach)
+// --------------------------------------------------
 
-
-export function loadWidgetHtml(): string {
+function loadWidgetHtml(): string {
   const htmlPath = path.join(process.cwd(), "public", "widget", "index.html");
   let html = fs.readFileSync(htmlPath, "utf8");
 
-  if (!BASE_URL) {
-    // If BASE_URL is missing, root-relative URLs (/assets/...) will break inside the iframe.
-    // You can either throw to catch misconfig early, or just return as-is.
-    // I'd rather fail loudly:
-    throw new Error("BASE_URL is not set. Cannot rewrite widget asset URLs for iframe rendering.");
-  }
+  if (!BASE_URL) return html;
 
-  // 1) Remove/override any <base href="/"> which would break relative URL resolution in an iframe context.
-  // If you want, you can set it to BASE_URL + "/public/widget/" instead.
-  html = html.replace(
-    /<base\s+href=["'][^"']*["']\s*\/?>/i,
-    `<base href="${BASE_URL}/public/widget/">`
+  html = html.replaceAll(
+    'src="/public/widget/',
+    `src="${BASE_URL}/public/widget/`
   );
-
-  // 2) Rewrite common Vite asset URL patterns to absolute URLs.
-  // Covers:
-  //  - /public/widget/...
-  //  - /assets/...
-  //  - ./assets/...
-  //  - assets/...
-  //
-  // We map them all to:  ${BASE_URL}/public/widget/...
-  //
-  // NOTE: If your build output is NOT under /public/widget/, adjust this prefix once.
-  const ABS_PREFIX = `${BASE_URL}/public/widget/`;
-
-  // /public/widget/...
-  html = html.replaceAll('src="/public/widget/', `src="${ABS_PREFIX}`);
-  html = html.replaceAll('href="/public/widget/', `href="${ABS_PREFIX}`);
-
-  // /assets/...  -> /public/widget/assets/...
-  html = html.replaceAll('src="/assets/', `src="${ABS_PREFIX}assets/`);
-  html = html.replaceAll('href="/assets/', `href="${ABS_PREFIX}assets/`);
-
-  // ./assets/... -> /public/widget/assets/...
-  html = html.replaceAll('src="./assets/', `src="${ABS_PREFIX}assets/`);
-  html = html.replaceAll('href="./assets/', `href="${ABS_PREFIX}assets/`);
-
-  // assets/... -> /public/widget/assets/...
-  html = html.replaceAll('src="assets/', `src="${ABS_PREFIX}assets/`);
-  html = html.replaceAll('href="assets/', `href="${ABS_PREFIX}assets/`);
+  html = html.replaceAll(
+    'href="/public/widget/',
+    `href="${BASE_URL}/public/widget/`
+  );
 
   return html;
 }
 
+// --------------------------------------------------
+// MCP Server Factory
+// --------------------------------------------------
 
-
-
-
-
-/**
- * Creates a fresh MCP server instance and registers all tools + the widget resource.
- * One instance per MCP session.
- */
 function createCricketServer() {
   const server = new McpServer({
     name: "cricket-sales-app",
-    version: "0.2.0"
+    version: "1.0.0"
   });
 
-  // Widget resource (Vite-built HTML + external assets)
-server.registerResource(
-  "cricket-widget-html",
-  "ui://widget/cricket/index.html",
-  {},
-  async () => {
-    const html = loadWidgetHtml(); // returns the final HTML string
-    return {
-      contents: [{
-        uri: "ui://widget/cricket/index.html",
-        mimeType: "text/html",
-        text: html,
-      }],
-    };
-  }
-);
+  // ----------------------------
+  // Widget HTML resource
+  // ----------------------------
+  server.registerResource(
+    "cricket-widget-html",
+    "ui://widget/cricket/index.html",
+    {},
+    async () => ({
+      contents: [
+        {
+          uri: "ui://widget/cricket/index.html",
+          mimeType: "text/html",
+          text: loadWidgetHtml()
+        }
+      ]
+    })
+  );
 
-server.registerResource(
-  "widget-assets",
-  "/public/widget/**", // keep whatever string you were using; this overload will now match
-  { description: "Cricket widget static assets" },
-  async (uri: URL ) => {
-    const assetPath = uriToLocalDistPath(uri.href);
-    const mimeType = guessMimeType(assetPath);
+  // ----------------------------
+  // Widget static assets
+  // ----------------------------
+  server.registerResource(
+    "widget-assets",
+    "/public/widget/**",
+    { description: "Cricket widget static assets" },
+    async (uri: URL) => {
+      const assetPath = uriToLocalPath(uri.href);
+      const mimeType = guessMimeType(assetPath);
 
-    if (!fs.existsSync(assetPath) || !fs.statSync(assetPath).isFile()) {
-      return { contents: [] };
-    }
+      if (!fs.existsSync(assetPath) || !fs.statSync(assetPath).isFile()) {
+        return { contents: [] };
+      }
 
-    const buf = fs.readFileSync(assetPath);
+      const buf = fs.readFileSync(assetPath);
 
-    // Return TEXT for js/css/html/svg/etc (this avoids the blob typing issues entirely)
-    if (isTextMime(mimeType)) {
+      if (isTextMime(mimeType)) {
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType,
+              text: buf.toString("utf8")
+            }
+          ]
+        };
+      }
+
       return {
         contents: [
           {
             uri: uri.href,
             mimeType,
-            text: buf.toString("utf8"),
-          },
-        ],
+            blob: buf.toString("base64"),
+            _meta: { encoding: "base64" }
+          }
+        ]
       };
     }
+  );
 
-    // Return BASE64 for binary files
+  // ----------------------------
+  // Tool: View Plans
+  // ----------------------------
+  server.registerTool(
+  "cricket_view_plans",
+  {
+    title: "Cricket: View plans",
+    description: "Show Cricket Wireless plans.",
+    inputSchema: {
+      recommendedPlanId: z.string().optional(),
+    },
+    _meta: {
+      "openai/outputTemplate": "ui://widget/cricket/index.html",
+    },
+  },
+  async (args) => {
+    const plans = [
+      {
+        id: "10gb",
+        name: "10GB Plan",
+        price: 40,
+        description: "10GB high-speed data + unlimited talk & text.",
+        bestFor: "Light users and budget shoppers.",
+      },
+      {
+        id: "unlimited_core",
+        name: "Unlimited Core",
+        price: 55,
+        description: "Unlimited data + hotspot included.",
+        bestFor: "Most customers and everyday streaming.",
+      },
+      {
+        id: "unlimited_more",
+        name: "Unlimited More",
+        price: 60,
+        description: "Premium unlimited + more hotspot for power users.",
+        bestFor: "Travel, hotspot, and heavy data use.",
+      },
+    ];
+
     return {
-      contents: [
-        {
-          uri: uri.href,
-          mimeType,
-          blob: buf.toString("base64"),
-          _meta: { encoding: "base64" },
-        },
-      ],
+      content: [{ type: "text", text: "Showing Cricket plans." }],
+      structuredContent: {
+        view: "plans",
+        plans,
+        recommendedPlanId: args?.recommendedPlanId ?? "unlimited_more",
+      },
     };
   }
 );
 
 
-
-  // ----------------------------
-  // TOOLS
-  // ----------------------------
-
-  // Plans tool (renders widget)
-  server.registerTool(
-    "cricket_view_plans",
-    {
-      title: "Cricket: view plans",
-      description: "Show Cricket Wireless plans and help the user pick one.",
-      inputSchema: {
-        recommendedPlanId: z
-          .enum(["10gb", "unlimited_core", "unlimited_more"])
-          .optional()
-          .describe("Optional preselected plan to highlight for the user.")
-      },
-      _meta: {
-        "openai/outputTemplate": "ui://widget/cricket-plans-inline-v3.html",
-        "openai/toolInvocation/invoking": "Loading Cricket Wireless plans…",
-        "openai/toolInvocation/invoked": "Cricket plans loaded."
-      }
-    },
-    async ({ recommendedPlanId }: { recommendedPlanId?: CricketPlanId }) => {
-      const recommended = (recommendedPlanId ??
-        "unlimited_more") as CricketPlanId;
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Showing Cricket Wireless plans. Recommended: ${recommended}.`
-          }
-        ],
-        structuredContent: {
-          view: "plans",
-          recommendedPlanId: recommended,
-          plans: PLANS
-        }
-      };
-    }
-  );
-
-  // Coverage tool
-  server.tool(
-    "cricket_check_coverage",
-    "Check Cricket coverage for a given ZIP code.",
-    {
-      zip: z
-        .string()
-        .min(3, "ZIP code seems too short")
-        .max(10, "ZIP code seems too long")
-    },
-    async ({ zip }) => {
-      const result = checkCoverage(zip);
-
-      return {
-        content: [{ type: "text", text: `Coverage in ${zip}: ${result.quality}.` }],
-        structuredContent: {
-          view: "coverage",
-          coverage: result
-        }
-      };
-    }
-  );
-
-  // Device compatibility tool
-  server.tool(
-    "cricket_check_device",
-    "Check if a device is compatible using IMEI.",
-    {
-      imei: z
-        .string()
-        .min(8, "IMEI seems too short")
-        .max(20, "IMEI seems too long")
-    },
-    async ({ imei }) => {
-      const result = checkDeviceCompatibility(imei);
-
-      return {
-        content: [{ type: "text", text: result.message }],
-        structuredContent: {
-          view: "device",
-          device: result
-        }
-      };
-    }
-  );
-
-  // Promotions tool
-  server.tool(
-    "cricket_promotions",
-    "Show current Cricket promotions, optionally filtered by plan.",
-    {
-      planId: z.enum(["10gb", "unlimited_core", "unlimited_more"]).optional()
-    },
-    async ({ planId }) => {
-      const promos = getPromotions();
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Here are the current Cricket Wireless deals and promotions."
-          }
-        ],
-        structuredContent: {
-          view: "promotions",
-          planId: planId ?? null,
-          promotions: promos
-        }
-      };
-    }
-  );
-
   return server;
 }
 
-// ---------------------------------------------------------------------------
-// Streamable HTTP wiring with proper sessions
-// ---------------------------------------------------------------------------
+// --------------------------------------------------
+// HTTP + MCP transport
+// --------------------------------------------------
+
 const transports: Record<string, StreamableHTTPServerTransport> = {};
 
 async function main() {
   const app = express();
 
-  app.use(
-    cors({
-      origin: "*",
-      exposedHeaders: ["Mcp-Session-Id"],
-      allowedHeaders: ["Content-Type", "mcp-session-id"]
-    })
-  );
+  app.use(cors({
+    origin: "*",
+    exposedHeaders: ["Mcp-Session-Id"],
+    allowedHeaders: ["Content-Type", "mcp-session-id"]
+  }));
 
-  // IMPORTANT: JSON for POST bodies
   app.use(express.json({ limit: "2mb" }));
-
-  // Health check
-  app.get("/", (_req, res) => res.send("Cricket MCP server is running"));
-
-  // Serve static assets (your built widget is at /public/widget/*)
   app.use("/public", express.static("public"));
 
-  // POST /mcp — client → server JSON-RPC
-  app.post("/mcp", async (req: Request, res: Response) => {
-    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+  app.get("/", (_req, res) => {
+    res.send("Cricket MCP server running");
+  });
 
+  app.post("/mcp", async (req, res) => {
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
     let transport: StreamableHTTPServerTransport;
 
     if (sessionId && transports[sessionId]) {
-      // Existing session
       transport = transports[sessionId];
     } else if (!sessionId && isInitializeRequest(req.body)) {
-      // New session: initialize a transport and connect a new server instance
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (sid) => {
           transports[sid] = transport;
-          console.log(`MCP session initialized: ${sid}`);
         }
       });
 
       transport.onclose = () => {
-        const sid = transport.sessionId;
-        if (sid && transports[sid]) {
-          console.log(`MCP session closed: ${sid}`);
-          delete transports[sid];
+        if (transport.sessionId) {
+          delete transports[transport.sessionId];
         }
       };
 
       const server = createCricketServer();
       await server.connect(transport);
     } else {
-      return res.status(400).json({
-        error: { message: "Bad Request: No valid session ID provided" }
-      });
+      return res.status(400).json({ error: "Invalid MCP session" });
     }
 
     await transport.handleRequest(req, res, req.body);
   });
 
-  // GET /mcp — server → client stream (SSE)
-  // DELETE /mcp — close session
-  const handleSessionRequest = async (req: Request, res: Response) => {
-    const sessionId = req.headers["mcp-session-id"] as string | undefined;
-    if (!sessionId || !transports[sessionId]) {
-      return res.status(404).send("Session not found");
-    }
-    await transports[sessionId].handleRequest(req, res);
-  };
-
-  app.use("/public", express.static(path.join(process.cwd(), "public")));
-  app.get("/mcp", handleSessionRequest);
-  app.get("/debug/widget-uri", (_req, res) => {
-  res.json({
-    inlineUri: "ui://widget/cricket-plans-inline.html",
-    baseUrl: BASE_URL || null
+  app.get("/mcp", async (req, res) => {
+    const sessionId = req.headers["mcp-session-id"] as string;
+    const transport = transports[sessionId];
+    if (!transport) return res.status(404).send("Session not found");
+    await transport.handleRequest(req, res);
   });
-});
-  app.delete("/mcp", handleSessionRequest);
 
-  const port = Number(process.env.PORT ?? 8000);
+  app.delete("/mcp", async (req, res) => {
+    const sessionId = req.headers["mcp-session-id"] as string;
+    const transport = transports[sessionId];
+    if (!transport) return res.status(404).send("Session not found");
+    await transport.handleRequest(req, res);
+  });
 
-  console.log("BASE_URL =", BASE_URL || "(not set)");
-  app.listen(port, () => {
-    console.log(`Cricket MCP server listening at http://localhost:${port}/mcp`);
-    console.log(`Widget local test: http://localhost:${port}/public/widget/index.html`);
+  app.listen(PORT, () => {
+    console.log(`MCP server running at http://localhost:${PORT}/mcp`);
+    console.log(`Widget test: http://localhost:${PORT}/public/widget/index.html`);
+    console.log(`BASE_URL = ${BASE_URL || "(not set)"}`);
   });
 }
 
-main().catch((err) => {
-  console.error("Failed to start server", err);
+main().catch(err => {
+  console.error("Server failed to start", err);
   process.exit(1);
 });
