@@ -18,6 +18,7 @@ import { Tunnel } from "cloudflared";
 // --------------------------------------------------
 
 const PORT = Number(process.env.PORT ?? 8000);
+const TEMPLATE_URI = "ui://widget/cricket/v2.html";
 
 // If BASE_URL is set explicitly (e.g. a real domain in production), it is used
 // as-is. Otherwise a Cloudflare quick tunnel is launched automatically at
@@ -120,14 +121,27 @@ function createCricketServer() {
   // ----------------------------
   server.registerResource(
     "cricket-widget-html",
-    "ui://widget/cricket/index.html",
+    TEMPLATE_URI,
     {},
     async () => ({
       contents: [
         {
-          uri: "ui://widget/cricket/index.html",
+          uri: TEMPLATE_URI,
           mimeType: "text/html;profile=mcp-app",
-          text: loadWidgetHtml()
+          text: loadWidgetHtml(),
+          _meta: {
+            ui: {
+              prefersBorder: true,
+              ...(BASE_URL ? { domain: BASE_URL } : {}),
+              csp: {
+                resourceDomains: [
+                  ...(BASE_URL ? [BASE_URL] : []),
+                  "https://www.cricketwireless.com"
+                ],
+                connectDomains: BASE_URL ? [BASE_URL] : []
+              }
+            }
+          }
         }
       ]
     })
@@ -182,12 +196,15 @@ function createCricketServer() {
   "cricket_view_plans",
   {
     title: "Cricket: View plans",
-    description: "Show Cricket Wireless plans.",
+    description: "Use this when the user wants to view or compare Cricket Wireless plans.",
     inputSchema: {
       recommendedPlanId: z.string().optional(),
     },
     _meta: {
-      "openai/outputTemplate": "ui://widget/cricket/index.html",
+      ui: {
+        resourceUri: TEMPLATE_URI,
+      },
+      "openai/outputTemplate": TEMPLATE_URI,
     },
   },
   async (args) => {
@@ -216,7 +233,7 @@ function createCricketServer() {
     ];
 
     return {
-      content: [{ type: "text", text: "Showing Cricket plans." }],
+      content: [{ type: "text", text: "Showing Cricket Wireless plans." }],
       structuredContent: {
         view: "plans",
         plans,
