@@ -248,6 +248,15 @@ async function main() {
   app.use(express.json({ limit: "2mb" }));
   app.use("/public", express.static("public"));
 
+  app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`[${req.method}] ${req.path} - ${res.statusCode} - ${duration}ms`);
+  });
+  next();
+});
+
   app.get("/", (_req, res) => {
     res.send("Cricket MCP server running");
   });
@@ -256,43 +265,64 @@ async function main() {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
     let transport: StreamableHTTPServerTransport;
 
-    if (sessionId && transports[sessionId]) {
-      transport = transports[sessionId];
-    } else if (!sessionId && isInitializeRequest(req.body)) {
-      transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (sid) => {
-          transports[sid] = transport;
-        }
-      });
+    try {
+      if (sessionId && transports[sessionId]) {
+        transport = transports[sessionId];
+      } else if (!sessionId && isInitializeRequest(req.body)) {
+        transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (sid) => {
+            transports[sid] = transport;
+          }
+        });
 
-      transport.onclose = () => {
-        if (transport.sessionId) {
-          delete transports[transport.sessionId];
-        }
-      };
+        transport.onclose = () => {
+          if (transport.sessionId) {
+            delete transports[transport.sessionId];
+          }
+        };
 
-      const server = createCricketServer();
-      await server.connect(transport);
-    } else {
-      return res.status(400).json({ error: "Invalid MCP session" });
+        const server = createCricketServer();
+        await server.connect(transport);
+      } else {
+        return res.status(400).json({ error: "Invalid MCP session" });
+      }
+
+      await transport.handleRequest(req, res, req.body);
+    } catch (error) {
+      console.error("[MCP Error]", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "MCP request failed", details: String(error) });
+      }
     }
-
-    await transport.handleRequest(req, res, req.body);
   });
 
   app.get("/mcp", async (req, res) => {
-    const sessionId = req.headers["mcp-session-id"] as string;
-    const transport = transports[sessionId];
-    if (!transport) return res.status(404).send("Session not found");
-    await transport.handleRequest(req, res);
+    try {
+      const sessionId = req.headers["mcp-session-id"] as string;
+      const transport = transports[sessionId];
+      if (!transport) return res.status(404).send("Session not found");
+      await transport.handleRequest(req, res);
+    } catch (error) {
+      console.error("[MCP GET Error]", error);
+      if (!res.headersSent) {
+        res.status(500).send("MCP request failed");
+      }
+    }
   });
 
   app.delete("/mcp", async (req, res) => {
-    const sessionId = req.headers["mcp-session-id"] as string;
-    const transport = transports[sessionId];
-    if (!transport) return res.status(404).send("Session not found");
-    await transport.handleRequest(req, res);
+    try {
+      const sessionId = req.headers["mcp-session-id"] as string;
+      const transport = transports[sessionId];
+      if (!transport) return res.status(404).send("Session not found");
+      await transport.handleRequest(req, res);
+    } catch (error) {
+      console.error("[MCP DELETE Error]", error);
+      if (!res.headersSent) {
+        res.status(500).send("MCP request failed");
+      }
+    }
   });
 
   app.listen(PORT, () => {

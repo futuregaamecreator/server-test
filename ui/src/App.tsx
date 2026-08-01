@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@openai/apps-sdk-ui/components/Button";
-import { Badge } from "@openai/apps-sdk-ui/components/Badge";
 
 type Plan = {
   id: string;
@@ -118,62 +117,78 @@ export default function App() {
 
       {/* TOOL: PLANS */}
       {toolView === "plans" && (
-        <div className="mt-3 grid gap-3">
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {plans.map((p) => {
             const isRecommended = p.id === recommendedPlanId;
 
             return (
               <div
                 key={p.id}
-                className={`rounded-xl border p-3 ${isRecommended
-                  ? "border-[#00a651] bg-white"
-                  : "border-default bg-surface"
-                  }`}
+                className="relative rounded-2xl border-2 border-gray-200 bg-white p-6 shadow-sm hover:shadow-md transition-shadow"
               >
-                <div className="flex justify-between gap-2">
-                  <div>
-                    <div className="font-semibold text-sm">
-                      {p.name} · ${p.price}/mo
-                    </div>
-                    <div className="mt-1 text-sm text-secondary">
-                      {p.description}
-                    </div>
-                  </div>
-
-                  {isRecommended && <Badge color="success">Best value</Badge>}
+                {/* Green 5G Corner Accent */}
+                <div className="absolute top-0 right-0 w-16 h-16 bg-[#00a651] rounded-bl-2xl flex items-center justify-center text-white text-xs font-bold">
+                  5G
                 </div>
 
-                <div className="mt-2 text-xs text-secondary">{p.bestFor}</div>
+                {/* Recommended Badge */}
+                {isRecommended && (
+                  <div className="absolute top-4 left-0 right-0 flex justify-center">
+                    <span className="bg-yellow-400 text-black text-xs font-bold px-3 py-1 rounded-full">
+                      4 lines for $100 monthly
+                    </span>
+                  </div>
+                )}
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    color="primary"
-                    className="!bg-[#00a651]"
-                    onClick={() =>
-                      callTool("cricket_promotions", { planId: p.id })
-                    }
-                  >
-                    Choose
-                  </Button>
+                <div className={isRecommended ? "mt-8" : ""}>
+                  {/* Plan Name */}
+                  <h3 className="text-lg font-bold text-gray-900">{p.name}</h3>
 
-                  <Button
-                    variant="soft"
-                    color="secondary"
+                  {/* Price */}
+                  <div className="mt-4">
+                    <div className="text-4xl font-bold text-gray-900">${p.price}</div>
+                    <div className="text-sm text-gray-600">/mo</div>
+                    <div className="text-xs text-gray-500 mt-1">when enrolled in Auto Pay</div>
+                  </div>
+
+                  {/* First Month Price */}
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <div className="text-sm font-semibold text-gray-900">
+                      ${Math.round(p.price * 1.2)} for the first month.
+                    </div>
+                    <div className="text-xs text-gray-600 mt-2">{p.description}</div>
+                  </div>
+
+                  {/* Features */}
+                  <div className="mt-4">
+                    <div className="text-xs text-gray-600">{p.bestFor}</div>
+                    <a href="#" className="text-xs text-blue-600 underline hover:text-blue-800 mt-2 inline-block">
+                      What our lawyers say
+                    </a>
+                  </div>
+
+                  {/* Button */}
+                  <button
                     onClick={() =>
                       callTool("cricket_view_plans", { recommendedPlanId: p.id })
                     }
+                    className="w-full mt-6 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors"
                   >
-                    Compare
-                  </Button>
-
-                  {/* 👈 LOCAL BACK */}
-                  <Button variant="soft" color="secondary" onClick={goHome}>
-                    Back
-                  </Button>
+                    View plan details
+                  </button>
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Back Button for Plans View */}
+      {toolView === "plans" && (
+        <div className="mt-4">
+          <Button variant="soft" color="secondary" onClick={goHome}>
+            Back
+          </Button>
         </div>
       )}
 

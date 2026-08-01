@@ -1,0 +1,68 @@
+{
+  "name": "Cricket Wireless MCP",
+  "version": "1.0.0",
+  "description": "Cricket Wireless sales assistant - compare prepaid mobile plans, check coverage, and verify device compatibility",
+  "keywords": [
+    "cricket wireless",
+    "cricket wireless plans",
+    "mobile plans",
+    "prepaid",
+    "cell phone",
+    "coverage",
+    "pricing",
+    "wireless service",
+    "telecom",
+    "phone plans",
+    "data plans"
+  ],
+  "homepage": "https://www.cricketwireless.com",
+  "author": {
+    "name": "Cricket Wireless",
+    "url": "https://www.cricketwireless.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/server-test"
+  },
+  "mcp": {
+    "url": "https://voip-repairs-independent-posing.trycloudflare.com/mcp",
+    "transport": "http",
+    "capabilities": {
+      "tools": true,
+      "resources": true,
+      "structured_output": true
+    }
+  },
+  "tools": [
+    {
+      "name": "cricket_wireless_plans",
+      "label": "View Cricket Plans",
+      "description": "Browse and compare Cricket Wireless prepaid mobile plans",
+      "keywords": ["plans", "pricing", "compare", "mobile"]
+    },
+    {
+      "name": "cricket_coverage",
+      "label": "Check Coverage",
+      "description": "Check Cricket Wireless coverage in a specific area by ZIP code",
+      "keywords": ["coverage", "service area", "availability"]
+    },
+    {
+      "name": "cricket_device_check",
+      "label": "Check Device Compatibility",
+      "description": "Verify if your device is compatible with Cricket Wireless",
+      "keywords": ["device", "compatibility", "phone", "IMEI"]
+    }
+  ],
+  "features": [
+    "Compare wireless plans",
+    "Check service coverage",
+    "Device compatibility verification",
+    "Interactive pricing widgets",
+    "Real-time plan recommendations"
+  ],
+  "openai": {
+    "category": "telecommunications",
+    "tags": ["wireless", "mobile", "telecom", "carrier"],
+    "icon": "https://www.cricketwireless.com/uiassets/logo_cricket-green.png"
+  }
+}

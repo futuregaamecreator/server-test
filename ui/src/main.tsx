@@ -2,7 +2,6 @@ import "./main.css"; // MUST be first (per Apps SDK UI docs)
 
 if (!(window as any).openai) {
   (window as any).openai = {
-    maxHeight: 260,
     toolOutput: {
       structuredContent: {
         view: "home",
