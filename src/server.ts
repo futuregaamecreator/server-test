@@ -11,20 +11,20 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { Tunnel } from "cloudflared";
 
 // --------------------------------------------------
 // Config
 // --------------------------------------------------
 
 const PORT = Number(process.env.PORT ?? 8000);
-const BASE_URL = (process.env.BASE_URL ?? "").replace(/\/$/, "");
 
-if (!BASE_URL) {
-  console.warn(
-    '[WARN] BASE_URL not set. Widget assets will NOT load in ChatGPT iframe.\n' +
-    'Example: BASE_URL="https://<your-tunnel>.trycloudflare.com"'
-  );
-}
+// If BASE_URL is set explicitly (e.g. a real domain in production), it is used
+// as-is. Otherwise a Cloudflare quick tunnel is launched automatically at
+// startup and BASE_URL is filled in from the URL it assigns — quick tunnel
+// URLs are randomized on every run, so hardcoding one always goes stale as
+// soon as the tunnel is restarted.
+let BASE_URL = (process.env.BASE_URL ?? "").replace(/\/$/, "");
 
 // --------------------------------------------------
 // Helpers
@@ -126,7 +126,7 @@ function createCricketServer() {
       contents: [
         {
           uri: "ui://widget/cricket/index.html",
-          mimeType: "text/html",
+          mimeType: "text/html;profile=mcp-app",
           text: loadWidgetHtml()
         }
       ]
@@ -328,7 +328,24 @@ async function main() {
   app.listen(PORT, () => {
     console.log(`MCP server running at http://localhost:${PORT}/mcp`);
     console.log(`Widget test: http://localhost:${PORT}/public/widget/index.html`);
-    console.log(`BASE_URL = ${BASE_URL || "(not set)"}`);
+
+    if (BASE_URL) {
+      console.log(`BASE_URL = ${BASE_URL} (from environment)`);
+      return;
+    }
+
+    console.log("[INFO] BASE_URL not set — starting a Cloudflare quick tunnel...");
+    const quickTunnel = Tunnel.quick(`http://localhost:${PORT}`);
+
+    quickTunnel.once("url", (url) => {
+      BASE_URL = url.replace(/\/$/, "");
+      console.log(`BASE_URL = ${BASE_URL} (auto-assigned by quick tunnel)`);
+      console.log("Use this URL as your app's MCP server URL in ChatGPT Developer Mode.");
+    });
+
+    quickTunnel.on("error", (err) => {
+      console.error("[Tunnel Error]", err);
+    });
   });
 }
 
