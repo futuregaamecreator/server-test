@@ -64,13 +64,12 @@ export default function App() {
     };
   }, []);
 
-  const { viewFromTool, plans, recommendedPlanId, maxHeight } = useMemo(() => {
+  const { viewFromTool, plans, recommendedPlanId } = useMemo(() => {
     const sc = toolOutput?.structuredContent ?? {};
     return {
       viewFromTool: (sc.view ?? null) as string | null,
       plans: (sc.plans ?? []) as Plan[],
       recommendedPlanId: sc.recommendedPlanId as string | undefined,
-      maxHeight: ((window as any).openai?.maxHeight ?? 260) as number,
     };
   }, [toolOutput]);
 
@@ -94,7 +93,7 @@ export default function App() {
   };
 
   return (
-    <div className="w-full px-3 py-2" style={{ maxHeight, overflowY: "auto" }}>
+    <div className="app-shell w-full px-3 py-2">
       {/* Header */}
       <div className="flex items-center justify-between gap-2 nav-header">
         <img

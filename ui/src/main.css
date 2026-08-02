@@ -5,6 +5,14 @@
 /* Required for Tailwind to scan SDK components */
 @source "../node_modules/@openai/apps-sdk-ui";
 
+.app-shell {
+  /* Follow the iframe as it grows into fullscreen instead of retaining the
+     inline widget's roughly 260px max-height. */
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+}
+
 .nav-header {
   padding-bottom: 12px;
   margin-bottom: 12px;
